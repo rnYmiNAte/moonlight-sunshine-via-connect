@@ -1,0 +1,69 @@
+name: CI Build & Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'scripts/**.ps1'
+      - 'configs/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-powershell:
+    name: Validate PowerShell Scripts
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup PowerShell
+        uses: microsoft/setup-msbuild@v2   # Helps with Windows tools if needed
+        # PowerShell 7+ is pre-installed on windows-latest
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+
+      - name: Run PSScriptAnalyzer (Error level only)
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path ./scripts -Recurse -Severity Error -EnableExit
+          if ($results) {
+            $results | Format-Table
+            exit 1
+          }
+          Write-Host "✅ No critical issues found in PowerShell scripts"
+
+      - name: Test Script Syntax (install, configure, connect)
+        shell: pwsh
+        run: |
+          # Basic syntax + dry-run checks
+          .\scripts\test-install.ps1 -DryRun
+          Write-Host "✅ install.ps1 syntax OK"
+          .\scripts\test-connect.ps1 -DryRun
+          Write-Host "✅ connect scripts syntax OK"
+
+      - name: Check Windows 11 requirement in scripts
+        shell: pwsh
+        run: |
+          $content = Get-Content .\scripts\install.ps1 -Raw
+          if ($content -notmatch "Windows 11|Build 22621") {
+            Write-Error "Windows 11 version check missing in install.ps1"
+            exit 1
+          }
+          Write-Host "✅ Windows 11 enforcement present"
+
+  hardware-bench-simulation:
+    name: Simulate High-End Hardware Config
+    runs-on: windows-latest
+    needs: validate-powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run benchmark simulation
+        shell: pwsh
+        run: |
+          .\scripts\benchmark.ps1 -SimulateHighEndHardware
+          Write-Host "✅ High-end (2TB/32GB/high-core CPU) config simulation passed"
