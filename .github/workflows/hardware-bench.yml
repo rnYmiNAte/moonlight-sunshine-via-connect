@@ -2,31 +2,48 @@ name: Hardware Benchmark (Self-Hosted)
 
 on:
   schedule:
-    - cron: '0 2 * * 1'          # Every Monday at 2 AM UTC
-  workflow_dispatch:             # Allow manual trigger
+    - cron: '0 2 * * 1'          # Every Monday at 2:00 AM UTC
+  workflow_dispatch:             # Allow manual trigger from GitHub UI
 
 jobs:
   benchmark-high-end-hardware:
     name: Run Sunshine Benchmark on 2TB/32GB/High-End CPU
-    runs-on: high-end-win11       # ← Label your self-hosted runner with this
-    if: runner.os == 'Windows'    # Extra safety
+    runs-on: high-end-win11       # Your self-hosted runner label (must be Windows 11)
+    
+    # ✅ Removed the problematic job-level if condition
+    # We now rely on the runner label + an early check inside the job
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify Windows 11 + Hardware Specs
+      - name: Verify Runner is Windows 11 + High-End Hardware
         shell: pwsh
         run: |
-          $os = Get-CimInstance Win32_OperatingSystem
-          Write-Host "OS: $($os.Caption) Build $($os.BuildNumber)"
-          if ($os.BuildNumber -lt 22621) { Write-Error "Not Windows 11"; exit 1 }
-          
-          $ram = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB
-          $disk = Get-Volume | Where-Object DriveType -eq 3 | Select-Object -First 1
-          Write-Host "RAM: $($ram) GB | Largest Drive: $($disk.Size / 1TB) TB"
-          if ($ram -lt 32) { Write-Warning "RAM below 32 GB" }
+          Write-Host "Runner OS: $env:RUNNER_OS"
+          Write-Host "Runner Name: $env:RUNNER_NAME"
 
+          $os = Get-CimInstance -ClassName Win32_OperatingSystem
+          Write-Host "Detected OS: $($os.Caption) (Build $($os.BuildNumber))"
+
+          if ($os.BuildNumber -lt 22621) {
+            Write-Error "❌ This workflow requires Windows 11 (Build 22621 or higher)"
+            exit 1
+          }
+
+          $ramGB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 0)
+          Write-Host "RAM: ${ramGB} GB"
+
+          if ($ramGB -lt 32) {
+            Write-Warning "⚠️  RAM is below 32 GB. Performance may be suboptimal."
+          }
+
+          $diskTB = [math]::Round((Get-Volume | Where-Object { $_.DriveType -eq 3 -and $_.Size -gt 0 } | 
+                    Sort-Object Size -Descending | Select-Object -First 1).Size / 1TB, 1)
+          Write-Host "Largest fixed drive: ${diskTB} TB"
+
+          Write-Host "✅ Runner validation passed (Windows 11 + high-end hardware assumed via label)"
+      
       - name: Run Full Benchmark
         shell: pwsh
         run: |
@@ -40,12 +57,12 @@ jobs:
 
       - name: Post Results to Discussion
         uses: peter-evans/create-or-update-comment@v4
-        if: always()
         with:
-          issue-number: 1                              # Change to your dedicated "Benchmark Results" discussion ID
+          issue-number: 1                    # ← Change to your actual "Benchmark Results" discussion number
           body: |
             ## Weekly High-End Hardware Benchmark Results
-            **Runner:** ${{ runner.name }} (Windows 11, 2TB+, 32GB+ RAM)
+            
+            **Runner:** \( {{ runner.name }} ( \){{ runner.os }})
             **Date:** ${{ github.event.repository.updated_at }}
             
             ```json
