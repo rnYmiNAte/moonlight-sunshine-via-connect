@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-and-release:
+    name: Build Installer & Create Release
+    runs-on: windows-latest
+    permissions:
+      contents: write   # Required for creating releases
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET (if you have any C# GUI in src/)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Optional GUI (if exists)
+        if: exists('./src/MoonlightConnect/MoonlightConnect.sln')
+        shell: pwsh
+        run: |
+          dotnet build ./src/MoonlightConnect/MoonlightConnect.sln --configuration Release
+
+      - name: Compile Inno Setup Installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: ./setup.iss          # Create this .iss file in repo root
+          options: /O+ /V
+
+      - name: Create Portable ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path scripts, configs, docs, assets -DestinationPath "Moonlight-Sunshine-via-Connect-Portable.zip" -Force
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.exe
+            Moonlight-Sunshine-via-Connect-Portable.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
