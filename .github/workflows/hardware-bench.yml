@@ -1,0 +1,54 @@
+name: Hardware Benchmark (Self-Hosted)
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'          # Every Monday at 2 AM UTC
+  workflow_dispatch:             # Allow manual trigger
+
+jobs:
+  benchmark-high-end-hardware:
+    name: Run Sunshine Benchmark on 2TB/32GB/High-End CPU
+    runs-on: high-end-win11       # ← Label your self-hosted runner with this
+    if: runner.os == 'Windows'    # Extra safety
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Windows 11 + Hardware Specs
+        shell: pwsh
+        run: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          Write-Host "OS: $($os.Caption) Build $($os.BuildNumber)"
+          if ($os.BuildNumber -lt 22621) { Write-Error "Not Windows 11"; exit 1 }
+          
+          $ram = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB
+          $disk = Get-Volume | Where-Object DriveType -eq 3 | Select-Object -First 1
+          Write-Host "RAM: $($ram) GB | Largest Drive: $($disk.Size / 1TB) TB"
+          if ($ram -lt 32) { Write-Warning "RAM below 32 GB" }
+
+      - name: Run Full Benchmark
+        shell: pwsh
+        run: |
+          .\scripts\benchmark.ps1 -FullBenchmark -OutputJson "benchmark-results.json"
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.json
+
+      - name: Post Results to Discussion
+        uses: peter-evans/create-or-update-comment@v4
+        if: always()
+        with:
+          issue-number: 1                              # Change to your dedicated "Benchmark Results" discussion ID
+          body: |
+            ## Weekly High-End Hardware Benchmark Results
+            **Runner:** ${{ runner.name }} (Windows 11, 2TB+, 32GB+ RAM)
+            **Date:** ${{ github.event.repository.updated_at }}
+            
+            ```json
+            ${{ readFile('benchmark-results.json') }}
+            ```
+          token: ${{ secrets.GITHUB_TOKEN }}
